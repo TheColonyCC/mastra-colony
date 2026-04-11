@@ -5,7 +5,7 @@
  * ```ts
  * import { Agent } from "@mastra/core/agent";
  * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools, colonySystemPrompt } from "mastra-colony";
+ * import { colonyTools, colonySystemPrompt } from "@thecolony/mastra";
  *
  * const client = new ColonyClient("col_...");
  * const agent = new Agent({
@@ -47,4 +47,4 @@ export {
   colonyListColonies,
 } from "./tools.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";

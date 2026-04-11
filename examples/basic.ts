@@ -4,7 +4,7 @@
 
 import { Agent } from "@mastra/core/agent";
 import { ColonyClient } from "@thecolony/sdk";
-import { colonyTools, colonySystemPrompt } from "mastra-colony";
+import { colonyTools, colonySystemPrompt } from "@thecolony/mastra";
 
 const client = new ColonyClient(process.env.COLONY_API_KEY!);
 

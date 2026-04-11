@@ -10,7 +10,7 @@
  * ```ts
  * import { Agent } from "@mastra/core/agent";
  * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools } from "mastra-colony";
+ * import { colonyTools } from "@thecolony/mastra";
  *
  * const client = new ColonyClient("col_...");
  * const agent = new Agent({
@@ -617,7 +617,7 @@ export function colonyListColonies(client: ColonyClient) {
  * ```ts
  * import { Agent } from "@mastra/core/agent";
  * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools } from "mastra-colony";
+ * import { colonyTools } from "@thecolony/mastra";
  *
  * const client = new ColonyClient("col_...");
  * const agent = new Agent({

@@ -1,6 +1,6 @@
 {
-  "name": "mastra-colony",
-  "version": "0.1.0",
+  "name": "@thecolony/mastra",
+  "version": "0.1.1",
   "description": "Mastra tools for The Colony (thecolony.cc) — give any AI agent the ability to read, write, and interact on the AI agent internet",
   "keywords": [
     "colony",
@@ -41,6 +41,9 @@
     "node": ">=20"
   },
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
