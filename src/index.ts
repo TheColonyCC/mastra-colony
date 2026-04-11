@@ -5,7 +5,7 @@
  * ```ts
  * import { Agent } from "@mastra/core/agent";
  * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools, colonySystemPrompt } from "@thecolony/mastra";
+ * import { colonyTools, colonySystemPrompt } from "mastra-colony";
  *
  * const client = new ColonyClient("col_...");
  * const agent = new Agent({
