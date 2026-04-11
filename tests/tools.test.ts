@@ -30,6 +30,7 @@ import {
   colonyFollow,
   colonyUnfollow,
   colonyListColonies,
+  colonyIterPosts,
   colonyUpdatePost,
   colonyDeletePost,
   colonyMarkNotificationsRead,
@@ -136,6 +137,19 @@ function mockClient(overrides: Partial<ColonyClient> = {}): ColonyClient {
     markNotificationsRead: vi.fn().mockResolvedValue({}),
     joinColony: vi.fn().mockResolvedValue({ success: true }),
     leaveColony: vi.fn().mockResolvedValue({ success: true }),
+    iterPosts: vi.fn().mockImplementation(async function* () {
+      yield {
+        id: "p1",
+        title: "Test Post",
+        body: "Hello world",
+        author: { username: "testuser" },
+        post_type: "discussion",
+        colony_id: "general",
+        score: 5,
+        comment_count: 2,
+        created_at: "2026-01-01",
+      };
+    }),
     ...overrides,
   } as unknown as ColonyClient;
 }
@@ -145,10 +159,10 @@ const ctx = {} as any;
 // ── Bundle tests ─────────────────────────────────────────────────
 
 describe("colonyTools bundle", () => {
-  it("returns all 29 tools", () => {
+  it("returns all 30 tools", () => {
     const client = mockClient();
     const tools = colonyTools(client);
-    expect(Object.keys(tools)).toHaveLength(29);
+    expect(Object.keys(tools)).toHaveLength(30);
   });
 
   it("every tool has a description", () => {
@@ -195,6 +209,7 @@ describe("colonyTools bundle", () => {
       "colonyFollow",
       "colonyUnfollow",
       "colonyListColonies",
+      "colonyIterPosts",
       "colonyUpdatePost",
       "colonyDeletePost",
       "colonyMarkNotificationsRead",
@@ -208,9 +223,9 @@ describe("colonyTools bundle", () => {
 });
 
 describe("colonyReadOnlyTools bundle", () => {
-  it("returns 14 tools", () => {
+  it("returns 15 tools", () => {
     const client = mockClient();
-    expect(Object.keys(colonyReadOnlyTools(client))).toHaveLength(14);
+    expect(Object.keys(colonyReadOnlyTools(client))).toHaveLength(15);
   });
 
   it("excludes write tools", () => {
@@ -485,6 +500,34 @@ describe("colonyListColonies", () => {
     const result = await t.execute!({}, ctx);
     expect(client.getColonies).toHaveBeenCalled();
     expect((result as any).colonies).toBeDefined();
+  });
+});
+
+describe("colonyIterPosts", () => {
+  it("iterates posts with pagination", async () => {
+    const client = mockClient();
+    const t = colonyIterPosts(client);
+    const result = await t.execute!({ colony: "general", sort: "top", maxResults: 10 }, ctx);
+    expect(client.iterPosts).toHaveBeenCalledWith({
+      colony: "general",
+      sort: "top",
+      postType: undefined,
+      maxResults: 10,
+    });
+    expect((result as any).count).toBe(1);
+    expect((result as any).posts[0]?.id).toBe("p1");
+  });
+
+  it("defaults to 50 when maxResults omitted", async () => {
+    const client = mockClient();
+    const t = colonyIterPosts(client);
+    await t.execute!({}, ctx);
+    expect(client.iterPosts).toHaveBeenCalledWith({
+      colony: undefined,
+      sort: "new",
+      postType: undefined,
+      maxResults: 50,
+    });
   });
 });
 

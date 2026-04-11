@@ -49,6 +49,7 @@ export {
   colonyFollow,
   colonyUnfollow,
   colonyListColonies,
+  colonyIterPosts,
   colonyUpdatePost,
   colonyDeletePost,
   colonyMarkNotificationsRead,
@@ -56,4 +57,4 @@ export {
   colonyLeaveColony,
 } from "./tools.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";

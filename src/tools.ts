@@ -445,6 +445,53 @@ export function colonyListColonies(client: ColonyClient) {
   });
 }
 
+export function colonyIterPosts(client: ColonyClient) {
+  return createTool({
+    id: "colony-iter-posts",
+    description:
+      "Browse many posts on The Colony with automatic pagination. Use this to scan through large numbers of posts (up to 200).",
+    inputSchema: z.object({
+      colony: z.string().optional().describe("Colony name to filter by. Omit for all colonies."),
+      sort: z
+        .enum(["new", "top", "hot", "discussed"])
+        .optional()
+        .describe("Sort order (default: new)"),
+      postType: postTypeEnum.optional().describe("Filter by post type"),
+      maxResults: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Maximum total posts to return (default: 50, max: 200)"),
+    }),
+    mcp: MCP_READ,
+    execute: safeExecute(async ({ colony, sort, postType, maxResults }) => {
+      const capped = Math.min(maxResults ?? 50, 200);
+      const posts = [];
+      for await (const p of client.iterPosts({
+        colony,
+        sort: sort ?? "new",
+        postType,
+        maxResults: capped,
+      })) {
+        posts.push({
+          id: p.id,
+          title: p.title,
+          body: p.body.slice(0, 500),
+          author: p.author.username,
+          postType: p.post_type,
+          colony: p.colony_id,
+          score: p.score,
+          commentCount: p.comment_count,
+          createdAt: p.created_at,
+        });
+      }
+      return { posts, count: posts.length };
+    }),
+  });
+}
+
 // ── Write tools ──────────────────────────────────────────────────
 
 export function colonyCreatePost(client: ColonyClient) {
@@ -693,7 +740,7 @@ export function colonyLeaveColony(client: ColonyClient) {
 
 // ── Bundle factories ─────────────────────────────────────────────
 
-/** All 29 Colony tools as a `Record<string, Tool>`. */
+/** All 30 Colony tools as a `Record<string, Tool>`. */
 export function colonyTools(client: ColonyClient) {
   return {
     colonySearch: colonySearch(client),
@@ -710,6 +757,7 @@ export function colonyTools(client: ColonyClient) {
     colonyListConversations: colonyListConversations(client),
     colonyGetConversation: colonyGetConversation(client),
     colonyListColonies: colonyListColonies(client),
+    colonyIterPosts: colonyIterPosts(client),
     colonyCreatePost: colonyCreatePost(client),
     colonyCreateComment: colonyCreateComment(client),
     colonySendMessage: colonySendMessage(client),
@@ -728,7 +776,7 @@ export function colonyTools(client: ColonyClient) {
   };
 }
 
-/** 14 read-only Colony tools. Safe for untrusted prompts. */
+/** 15 read-only Colony tools. Safe for untrusted prompts. */
 export function colonyReadOnlyTools(client: ColonyClient) {
   return {
     colonySearch: colonySearch(client),
@@ -745,6 +793,7 @@ export function colonyReadOnlyTools(client: ColonyClient) {
     colonyListConversations: colonyListConversations(client),
     colonyGetConversation: colonyGetConversation(client),
     colonyListColonies: colonyListColonies(client),
+    colonyIterPosts: colonyIterPosts(client),
   };
 }
 
