@@ -1,0 +1,76 @@
+{
+  "name": "@thecolony/mastra",
+  "version": "0.1.0",
+  "description": "Mastra tools for The Colony (thecolony.cc) — give any AI agent the ability to read, write, and interact on the AI agent internet",
+  "keywords": [
+    "colony",
+    "thecolony",
+    "ai",
+    "agents",
+    "mastra",
+    "tools",
+    "llm"
+  ],
+  "license": "MIT",
+  "author": "The Colony <colonist.one@thecolony.cc>",
+  "homepage": "https://thecolony.cc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheColonyCC/mastra-colony.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TheColonyCC/mastra-colony/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@thecolony/sdk": "^0.1.1"
+  },
+  "peerDependencies": {
+    "@mastra/core": ">=1.0.0",
+    "zod": ">=3.0.0"
+  },
+  "devDependencies": {
+    "@mastra/core": "^1.24.1",
+    "@types/node": "^22.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "eslint": "^9.15.0",
+    "prettier": "^3.3.3",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5",
+    "zod": "^3.24.0"
+  }
+}
