@@ -1,26 +1,12 @@
 /**
  * Mastra tool adapters for The Colony.
  *
- * Each tool wraps a {@link ColonyClient} method, exposing it to the LLM as a
- * callable function with a typed Zod schema via Mastra's `createTool`.
- * The LLM sees the tool description and schema, decides when to invoke it,
- * and gets back structured JSON — no prompt-engineering required.
+ * Each tool wraps a {@link ColonyClient} method via Mastra's `createTool`.
  *
- * @example
- * ```ts
- * import { Agent } from "@mastra/core/agent";
- * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools } from "@thecolony/mastra";
- *
- * const client = new ColonyClient("col_...");
- * const agent = new Agent({
- *   name: "ColonyAgent",
- *   instructions: "You are a helpful assistant on The Colony.",
- *   model: "openai/gpt-4o",
- *   tools: colonyTools(client),
- * });
- * const result = await agent.generate("Find the top posts about AI agents.");
- * ```
+ * Mastra-specific features beyond the sibling integrations:
+ * - **MCP annotations** (`readOnlyHint`, `destructiveHint`, `idempotentHint`)
+ *   for automatic MCP compatibility
+ * - **29 tools** matching full parity with pydantic-ai-colony / openai-agents-colony
  */
 
 import { createTool } from "@mastra/core/tools";
@@ -63,34 +49,59 @@ function safeExecute<TInput, TResult>(
   };
 }
 
-// ── Individual tool factories ─────────────────────────────────────
+// ── Shared enums ─────────────────────────────────────────────────
 
-/** Search posts and users on The Colony. */
+const emojiEnum = z.enum([
+  "thumbs_up",
+  "heart",
+  "laugh",
+  "thinking",
+  "fire",
+  "eyes",
+  "rocket",
+  "clap",
+]);
+
+const postTypeEnum = z.enum([
+  "discussion",
+  "analysis",
+  "question",
+  "finding",
+  "human_request",
+  "paid_task",
+  "poll",
+]);
+
+const MCP_READ = {
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+} as const;
+const MCP_WRITE = {
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+} as const;
+const MCP_IDEMPOTENT_WRITE = {
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+} as const;
+const MCP_DESTRUCTIVE = {
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+} as const;
+
+// ── Read-only tools ──────────────────────────────────────────────
+
 export function colonySearch(client: ColonyClient) {
   return createTool({
     id: "colony-search",
     description:
-      "Search The Colony (thecolony.cc) for posts and users. Returns matching posts and user profiles. Use this when you need to find information, posts about a topic, or look up agents/humans.",
+      "Search The Colony (thecolony.cc) for posts and users. Returns matching posts and user profiles.",
     inputSchema: z.object({
       query: z.string().describe("Search text (min 2 characters)"),
       limit: z.number().int().min(1).max(100).optional().describe("Max results to return"),
-      postType: z
-        .enum([
-          "discussion",
-          "analysis",
-          "question",
-          "finding",
-          "human_request",
-          "paid_task",
-          "poll",
-        ])
-        .optional()
-        .describe("Filter by post type"),
+      postType: postTypeEnum.optional().describe("Filter by post type"),
       sort: z
         .enum(["relevance", "newest", "oldest", "top", "discussed"])
         .optional()
-        .describe("Sort order (default: relevance)"),
+        .describe("Sort order"),
     }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ query, limit, postType, sort }) => {
       const result = await client.search(query, { limit, postType, sort });
       return {
@@ -118,37 +129,24 @@ export function colonySearch(client: ColonyClient) {
   });
 }
 
-/** Browse recent or top posts on The Colony. */
 export function colonyGetPosts(client: ColonyClient) {
   return createTool({
     id: "colony-get-posts",
     description:
-      "Browse posts on The Colony (thecolony.cc). Returns a list of posts sorted by recency, popularity, or discussion activity. Use this to see what's happening on the platform or in a specific colony.",
+      "Browse posts on The Colony. Returns posts sorted by recency, popularity, or discussion activity.",
     inputSchema: z.object({
       colony: z
         .string()
         .optional()
-        .describe(
-          'Colony name (e.g. "general", "findings", "questions", "crypto", "art"). Omit for all.',
-        ),
+        .describe('Colony name (e.g. "general", "findings"). Omit for all.'),
       sort: z
         .enum(["new", "top", "hot", "discussed"])
         .optional()
         .describe("Sort order (default: new)"),
       limit: z.number().int().min(1).max(50).optional().describe("Number of posts to return"),
-      postType: z
-        .enum([
-          "discussion",
-          "analysis",
-          "question",
-          "finding",
-          "human_request",
-          "paid_task",
-          "poll",
-        ])
-        .optional()
-        .describe("Filter by post type"),
+      postType: postTypeEnum.optional().describe("Filter by post type"),
     }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ colony, sort, limit, postType }) => {
       const result = await client.getPosts({ colony, sort: sort ?? "new", limit, postType });
       return {
@@ -170,15 +168,13 @@ export function colonyGetPosts(client: ColonyClient) {
   });
 }
 
-/** Read a single post with its full body. */
 export function colonyGetPost(client: ColonyClient) {
   return createTool({
     id: "colony-get-post",
     description:
-      "Read a single post on The Colony by its ID. Returns the full post body, author info, and metadata. Use this after browsing or searching to read a specific post in full.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the post to read"),
-    }),
+      "Read a single post on The Colony by its ID. Returns the full post body, author info, and metadata.",
+    inputSchema: z.object({ postId: z.string().describe("The UUID of the post to read") }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ postId }) => {
       const p = await client.getPost(postId);
       return {
@@ -204,12 +200,11 @@ export function colonyGetPost(client: ColonyClient) {
   });
 }
 
-/** Read comments on a post. */
 export function colonyGetComments(client: ColonyClient) {
   return createTool({
     id: "colony-get-comments",
     description:
-      "Read comments on a Colony post. Returns the comment thread with authors and scores. Use this to understand the discussion around a post.",
+      "Read comments on a Colony post. Returns the comment thread with authors and scores.",
     inputSchema: z.object({
       postId: z.string().describe("The UUID of the post to read comments from"),
       maxComments: z
@@ -220,6 +215,7 @@ export function colonyGetComments(client: ColonyClient) {
         .optional()
         .describe("Max comments to return (default: 20)"),
     }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ postId, maxComments }) => {
       const comments = [];
       for await (const c of client.iterComments(postId, maxComments ?? 20)) {
@@ -237,93 +233,12 @@ export function colonyGetComments(client: ColonyClient) {
   });
 }
 
-/** Create a new post on The Colony. */
-export function colonyCreatePost(client: ColonyClient) {
-  return createTool({
-    id: "colony-create-post",
-    description:
-      "Create a new post on The Colony (thecolony.cc). Use this to share findings, ask questions, start discussions, or post analyses. The post will be attributed to the authenticated agent.",
-    inputSchema: z.object({
-      title: z.string().min(1).max(300).describe("Post title"),
-      body: z.string().min(1).describe("Post body (markdown supported)"),
-      colony: z
-        .string()
-        .optional()
-        .describe(
-          'Colony to post in (e.g. "general", "findings", "questions", "crypto", "art"). Default: general',
-        ),
-      postType: z
-        .enum(["discussion", "analysis", "question", "finding"])
-        .optional()
-        .describe("Post type (default: discussion)"),
-    }),
-    execute: safeExecute(async ({ title, body, colony, postType }) => {
-      const post = await client.createPost(title, body, {
-        colony: colony ?? "general",
-        postType: postType ?? "discussion",
-      });
-      return {
-        id: post.id,
-        title: post.title,
-        url: `https://thecolony.cc/p/${post.id}`,
-        createdAt: post.created_at,
-      };
-    }),
-  });
-}
-
-/** Comment on a post. */
-export function colonyCreateComment(client: ColonyClient) {
-  return createTool({
-    id: "colony-create-comment",
-    description:
-      "Comment on a post on The Colony. Use this to reply to a post or join a discussion. Optionally reply to a specific comment for threaded conversations.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the post to comment on"),
-      body: z.string().min(1).describe("Comment text"),
-      parentId: z
-        .string()
-        .optional()
-        .describe("UUID of the comment to reply to (for threaded replies)"),
-    }),
-    execute: safeExecute(async ({ postId, body, parentId }) => {
-      const comment = await client.createComment(postId, body, parentId);
-      return {
-        id: comment.id,
-        postId: comment.post_id,
-        body: comment.body,
-        createdAt: comment.created_at,
-      };
-    }),
-  });
-}
-
-/** Send a direct message to another agent. */
-export function colonySendMessage(client: ColonyClient) {
-  return createTool({
-    id: "colony-send-message",
-    description:
-      "Send a direct message to another agent or human on The Colony. The recipient is identified by their username. Requires karma >= 5.",
-    inputSchema: z.object({
-      username: z.string().describe("Username of the recipient"),
-      body: z.string().min(1).describe("Message text"),
-    }),
-    execute: safeExecute(async ({ username, body }) => {
-      const msg = await client.sendMessage(username, body);
-      return { id: msg.id, body: msg.body, createdAt: msg.created_at };
-    }),
-  });
-}
-
-/** Look up a user's profile. */
 export function colonyGetUser(client: ColonyClient) {
   return createTool({
     id: "colony-get-user",
-    description:
-      "Look up a user's profile on The Colony by their user ID. Returns their bio, karma, capabilities, and account type.",
-    inputSchema: z.object({
-      userId: z.string().describe("The UUID of the user to look up"),
-    }),
+    description: "Look up a user's profile on The Colony by their user ID.",
+    inputSchema: z.object({ userId: z.string().describe("The UUID of the user to look up") }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ userId }) => {
       const u = await client.getUser(userId);
       return {
@@ -340,24 +255,17 @@ export function colonyGetUser(client: ColonyClient) {
   });
 }
 
-/** Browse the user directory. */
 export function colonyDirectory(client: ColonyClient) {
   return createTool({
     id: "colony-directory",
-    description:
-      "Browse or search the user directory on The Colony. Find agents and humans by name, bio, or skills. Use this to discover collaborators or interesting agents.",
+    description: "Browse or search the user directory on The Colony. Find agents and humans.",
     inputSchema: z.object({
       query: z.string().optional().describe("Search text matched against name, bio, skills"),
-      userType: z
-        .enum(["all", "agent", "human"])
-        .optional()
-        .describe("Filter by account type (default: all)"),
-      sort: z
-        .enum(["karma", "newest", "active"])
-        .optional()
-        .describe("Sort order (default: karma)"),
+      userType: z.enum(["all", "agent", "human"]).optional().describe("Filter by account type"),
+      sort: z.enum(["karma", "newest", "active"]).optional().describe("Sort order"),
       limit: z.number().int().min(1).max(50).optional().describe("Max results"),
     }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ query, userType, sort, limit }) => {
       const result = await client.directory({
         query,
@@ -380,13 +288,12 @@ export function colonyDirectory(client: ColonyClient) {
   });
 }
 
-/** Get the authenticated agent's own profile. */
 export function colonyGetMe(client: ColonyClient) {
   return createTool({
     id: "colony-get-me",
-    description:
-      "Get the authenticated agent's own profile on The Colony. Returns username, karma, bio, and capabilities.",
+    description: "Get the authenticated agent's own profile on The Colony.",
     inputSchema: z.object({}),
+    mcp: MCP_READ,
     execute: safeExecute(async () => {
       const me = await client.getMe();
       return {
@@ -403,16 +310,15 @@ export function colonyGetMe(client: ColonyClient) {
   });
 }
 
-/** Check unread notifications. */
 export function colonyGetNotifications(client: ColonyClient) {
   return createTool({
     id: "colony-get-notifications",
-    description:
-      "Check notifications on The Colony — replies, mentions, and other activity. Use this to see what requires attention.",
+    description: "Check notifications on The Colony — replies, mentions, and other activity.",
     inputSchema: z.object({
       unreadOnly: z.boolean().optional().describe("Only return unread notifications"),
       limit: z.number().int().min(1).max(50).optional().describe("Max notifications"),
     }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ unreadOnly, limit }) => {
       const notifications = await client.getNotifications({ unreadOnly, limit });
       return {
@@ -430,69 +336,38 @@ export function colonyGetNotifications(client: ColonyClient) {
   });
 }
 
-/** Upvote or downvote a post. */
-export function colonyVotePost(client: ColonyClient) {
+export function colonyGetNotificationCount(client: ColonyClient) {
   return createTool({
-    id: "colony-vote-post",
-    description: "Upvote or downvote a post on The Colony. Vote value 1 = upvote, -1 = downvote.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the post to vote on"),
-      value: z.enum(["1", "-1"]).describe("Vote value: '1' for upvote, '-1' for downvote"),
-    }),
-    execute: safeExecute(async ({ postId, value }) => {
-      const vote = (value === "1" ? 1 : -1) as 1 | -1;
-      await client.votePost(postId, vote);
-      return { success: true, postId, vote };
+    id: "colony-get-notification-count",
+    description: "Get the count of unread notifications on The Colony. Lightweight check.",
+    inputSchema: z.object({}),
+    mcp: MCP_READ,
+    execute: safeExecute(async () => {
+      const r = await client.getNotificationCount();
+      return { count: r.count };
     }),
   });
 }
 
-/** Upvote or downvote a comment. */
-export function colonyVoteComment(client: ColonyClient) {
+export function colonyGetUnreadCount(client: ColonyClient) {
   return createTool({
-    id: "colony-vote-comment",
-    description:
-      "Upvote or downvote a comment on The Colony. Vote value 1 = upvote, -1 = downvote.",
-    inputSchema: z.object({
-      commentId: z.string().describe("The UUID of the comment to vote on"),
-      value: z.enum(["1", "-1"]).describe("Vote value: '1' for upvote, '-1' for downvote"),
-    }),
-    execute: safeExecute(async ({ commentId, value }) => {
-      const vote = (value === "1" ? 1 : -1) as 1 | -1;
-      await client.voteComment(commentId, vote);
-      return { success: true, commentId, vote };
+    id: "colony-get-unread-count",
+    description: "Get the count of unread direct messages on The Colony.",
+    inputSchema: z.object({}),
+    mcp: MCP_READ,
+    execute: safeExecute(async () => {
+      const r = await client.getUnreadCount();
+      return { count: r.count };
     }),
   });
 }
 
-/** Toggle an emoji reaction on a post. */
-export function colonyReactPost(client: ColonyClient) {
-  return createTool({
-    id: "colony-react-post",
-    description:
-      "Toggle an emoji reaction on a post on The Colony. Calling with the same emoji again removes the reaction.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the post to react to"),
-      emoji: z
-        .enum(["thumbs_up", "heart", "laugh", "thinking", "fire", "eyes", "rocket", "clap"])
-        .describe("Reaction emoji key"),
-    }),
-    execute: safeExecute(async ({ postId, emoji }) => {
-      await client.reactPost(postId, emoji as ReactionEmoji);
-      return { success: true, postId, emoji };
-    }),
-  });
-}
-
-/** Get poll results for a post. */
 export function colonyGetPoll(client: ColonyClient) {
   return createTool({
     id: "colony-get-poll",
-    description:
-      "Get poll results for a poll post on The Colony. Returns the options with vote counts and whether you have already voted.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the poll post"),
-    }),
+    description: "Get poll results for a poll post on The Colony.",
+    inputSchema: z.object({ postId: z.string().describe("The UUID of the poll post") }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ postId }) => {
       const poll = await client.getPoll(postId);
       return {
@@ -506,30 +381,12 @@ export function colonyGetPoll(client: ColonyClient) {
   });
 }
 
-/** Vote on a poll. */
-export function colonyVotePoll(client: ColonyClient) {
-  return createTool({
-    id: "colony-vote-poll",
-    description:
-      "Vote on a poll post on The Colony. Select one or more option IDs to cast your vote. You can only vote once per poll.",
-    inputSchema: z.object({
-      postId: z.string().describe("The UUID of the poll post"),
-      optionIds: z.array(z.string()).min(1).describe("Array of option IDs to vote for"),
-    }),
-    execute: safeExecute(async ({ postId, optionIds }) => {
-      const result = await client.votePoll(postId, optionIds);
-      return result;
-    }),
-  });
-}
-
-/** List DM conversations (inbox). */
 export function colonyListConversations(client: ColonyClient) {
   return createTool({
     id: "colony-list-conversations",
-    description:
-      "List your direct message conversations on The Colony. Returns your DM inbox with recent conversations and unread counts.",
+    description: "List your direct message conversations on The Colony.",
     inputSchema: z.object({}),
+    mcp: MCP_READ,
     execute: safeExecute(async () => {
       const convos = await client.listConversations();
       return {
@@ -546,15 +403,12 @@ export function colonyListConversations(client: ColonyClient) {
   });
 }
 
-/** Read a DM conversation thread. */
 export function colonyGetConversation(client: ColonyClient) {
   return createTool({
     id: "colony-get-conversation",
-    description:
-      "Read a direct message conversation thread on The Colony. Returns the full message history with a specific user.",
-    inputSchema: z.object({
-      username: z.string().describe("Username of the other participant in the conversation"),
-    }),
+    description: "Read a direct message conversation thread on The Colony.",
+    inputSchema: z.object({ username: z.string().describe("Username of the other participant") }),
+    mcp: MCP_READ,
     execute: safeExecute(async ({ username }) => {
       const convo = await client.getConversation(username);
       return {
@@ -571,28 +425,12 @@ export function colonyGetConversation(client: ColonyClient) {
   });
 }
 
-/** Follow a user. */
-export function colonyFollow(client: ColonyClient) {
-  return createTool({
-    id: "colony-follow",
-    description: "Follow a user on The Colony. Subscribe to their posts and activity in your feed.",
-    inputSchema: z.object({
-      userId: z.string().describe("The UUID of the user to follow"),
-    }),
-    execute: safeExecute(async ({ userId }) => {
-      const result = await client.follow(userId);
-      return result;
-    }),
-  });
-}
-
-/** List all colonies. */
 export function colonyListColonies(client: ColonyClient) {
   return createTool({
     id: "colony-list-colonies",
-    description:
-      "List all available colonies (communities/categories) on The Colony. Use this to discover what colonies exist and where to post or browse.",
+    description: "List all available colonies (communities/categories) on The Colony.",
     inputSchema: z.object({}),
+    mcp: MCP_READ,
     execute: safeExecute(async () => {
       const colonies = await client.getColonies();
       return {
@@ -607,57 +445,290 @@ export function colonyListColonies(client: ColonyClient) {
   });
 }
 
+// ── Write tools ──────────────────────────────────────────────────
+
+export function colonyCreatePost(client: ColonyClient) {
+  return createTool({
+    id: "colony-create-post",
+    description:
+      "Create a new post on The Colony. The post will be attributed to the authenticated agent.",
+    inputSchema: z.object({
+      title: z.string().min(1).max(300).describe("Post title"),
+      body: z.string().min(1).describe("Post body (markdown supported)"),
+      colony: z.string().optional().describe('Colony to post in. Default: "general"'),
+      postType: z
+        .enum(["discussion", "analysis", "question", "finding"])
+        .optional()
+        .describe("Post type"),
+    }),
+    mcp: MCP_WRITE,
+    execute: safeExecute(async ({ title, body, colony, postType }) => {
+      const post = await client.createPost(title, body, {
+        colony: colony ?? "general",
+        postType: postType ?? "discussion",
+      });
+      return {
+        id: post.id,
+        title: post.title,
+        url: `https://thecolony.cc/p/${post.id}`,
+        createdAt: post.created_at,
+      };
+    }),
+  });
+}
+
+export function colonyCreateComment(client: ColonyClient) {
+  return createTool({
+    id: "colony-create-comment",
+    description: "Comment on a post on The Colony. Optionally reply to a specific comment.",
+    inputSchema: z.object({
+      postId: z.string().describe("The UUID of the post to comment on"),
+      body: z.string().min(1).describe("Comment text"),
+      parentId: z
+        .string()
+        .optional()
+        .describe("UUID of the comment to reply to (threaded replies)"),
+    }),
+    mcp: MCP_WRITE,
+    execute: safeExecute(async ({ postId, body, parentId }) => {
+      const comment = await client.createComment(postId, body, parentId);
+      return {
+        id: comment.id,
+        postId: comment.post_id,
+        body: comment.body,
+        createdAt: comment.created_at,
+      };
+    }),
+  });
+}
+
+export function colonySendMessage(client: ColonyClient) {
+  return createTool({
+    id: "colony-send-message",
+    description:
+      "Send a direct message to another agent or human on The Colony. Requires karma >= 5.",
+    inputSchema: z.object({
+      username: z.string().describe("Username of the recipient"),
+      body: z.string().min(1).describe("Message text"),
+    }),
+    mcp: MCP_WRITE,
+    execute: safeExecute(async ({ username, body }) => {
+      const msg = await client.sendMessage(username, body);
+      return { id: msg.id, body: msg.body, createdAt: msg.created_at };
+    }),
+  });
+}
+
+export function colonyVotePost(client: ColonyClient) {
+  return createTool({
+    id: "colony-vote-post",
+    description: "Upvote or downvote a post on The Colony. Vote value 1 = upvote, -1 = downvote.",
+    inputSchema: z.object({
+      postId: z.string().describe("The UUID of the post"),
+      value: z.enum(["1", "-1"]).describe("Vote value"),
+    }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ postId, value }) => {
+      const vote = (value === "1" ? 1 : -1) as 1 | -1;
+      await client.votePost(postId, vote);
+      return { success: true, postId, vote };
+    }),
+  });
+}
+
+export function colonyVoteComment(client: ColonyClient) {
+  return createTool({
+    id: "colony-vote-comment",
+    description: "Upvote or downvote a comment on The Colony.",
+    inputSchema: z.object({
+      commentId: z.string().describe("The UUID of the comment"),
+      value: z.enum(["1", "-1"]).describe("Vote value"),
+    }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ commentId, value }) => {
+      const vote = (value === "1" ? 1 : -1) as 1 | -1;
+      await client.voteComment(commentId, vote);
+      return { success: true, commentId, vote };
+    }),
+  });
+}
+
+export function colonyReactPost(client: ColonyClient) {
+  return createTool({
+    id: "colony-react-post",
+    description: "Toggle an emoji reaction on a post on The Colony.",
+    inputSchema: z.object({
+      postId: z.string().describe("The UUID of the post"),
+      emoji: emojiEnum.describe("Reaction emoji key"),
+    }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ postId, emoji }) => {
+      await client.reactPost(postId, emoji as ReactionEmoji);
+      return { success: true, postId, emoji };
+    }),
+  });
+}
+
+export function colonyReactComment(client: ColonyClient) {
+  return createTool({
+    id: "colony-react-comment",
+    description: "Toggle an emoji reaction on a comment on The Colony.",
+    inputSchema: z.object({
+      commentId: z.string().describe("The UUID of the comment"),
+      emoji: emojiEnum.describe("Reaction emoji key"),
+    }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ commentId, emoji }) => {
+      await client.reactComment(commentId, emoji as ReactionEmoji);
+      return { success: true, commentId, emoji };
+    }),
+  });
+}
+
+export function colonyVotePoll(client: ColonyClient) {
+  return createTool({
+    id: "colony-vote-poll",
+    description: "Vote on a poll post on The Colony. You can only vote once per poll.",
+    inputSchema: z.object({
+      postId: z.string().describe("The UUID of the poll post"),
+      optionIds: z.array(z.string()).min(1).describe("Option IDs to vote for"),
+    }),
+    mcp: MCP_WRITE,
+    execute: safeExecute(async ({ postId, optionIds }) => {
+      return await client.votePoll(postId, optionIds);
+    }),
+  });
+}
+
+export function colonyFollow(client: ColonyClient) {
+  return createTool({
+    id: "colony-follow",
+    description: "Follow a user on The Colony.",
+    inputSchema: z.object({ userId: z.string().describe("The UUID of the user to follow") }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ userId }) => {
+      return await client.follow(userId);
+    }),
+  });
+}
+
+export function colonyUnfollow(client: ColonyClient) {
+  return createTool({
+    id: "colony-unfollow",
+    description: "Unfollow a user on The Colony.",
+    inputSchema: z.object({ userId: z.string().describe("The UUID of the user to unfollow") }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ userId }) => {
+      return await client.unfollow(userId);
+    }),
+  });
+}
+
+export function colonyUpdatePost(client: ColonyClient) {
+  return createTool({
+    id: "colony-update-post",
+    description: "Update an existing post on The Colony. Only the post author can update.",
+    inputSchema: z.object({
+      postId: z.string().describe("The UUID of the post to update"),
+      title: z.string().optional().describe("New title (omit to keep current)"),
+      body: z.string().optional().describe("New body text (omit to keep current)"),
+    }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ postId, title, body }) => {
+      const r = await client.updatePost(postId, { title, body });
+      return { id: r.id, title: r.title, updatedAt: r.updated_at };
+    }),
+  });
+}
+
+export function colonyDeletePost(client: ColonyClient) {
+  return createTool({
+    id: "colony-delete-post",
+    description: "Delete a post on The Colony. Only the post author can delete. Irreversible.",
+    inputSchema: z.object({ postId: z.string().describe("The UUID of the post to delete") }),
+    mcp: MCP_DESTRUCTIVE,
+    execute: safeExecute(async ({ postId }) => {
+      await client.deletePost(postId);
+      return { success: true, postId };
+    }),
+  });
+}
+
+export function colonyMarkNotificationsRead(client: ColonyClient) {
+  return createTool({
+    id: "colony-mark-notifications-read",
+    description: "Mark all notifications as read on The Colony.",
+    inputSchema: z.object({}),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async () => {
+      await client.markNotificationsRead();
+      return { success: true };
+    }),
+  });
+}
+
+export function colonyJoinColony(client: ColonyClient) {
+  return createTool({
+    id: "colony-join-colony",
+    description: "Join a colony (sub-community) on The Colony.",
+    inputSchema: z.object({ colony: z.string().describe("Colony name to join") }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ colony }) => {
+      return await client.joinColony(colony);
+    }),
+  });
+}
+
+export function colonyLeaveColony(client: ColonyClient) {
+  return createTool({
+    id: "colony-leave-colony",
+    description: "Leave a colony (sub-community) on The Colony.",
+    inputSchema: z.object({ colony: z.string().describe("Colony name to leave") }),
+    mcp: MCP_IDEMPOTENT_WRITE,
+    execute: safeExecute(async ({ colony }) => {
+      return await client.leaveColony(colony);
+    }),
+  });
+}
+
 // ── Bundle factories ─────────────────────────────────────────────
 
-/**
- * All Colony tools bundled as a `Record<string, Tool>`, ready to pass
- * to a Mastra `Agent`'s `tools` property.
- *
- * @example
- * ```ts
- * import { Agent } from "@mastra/core/agent";
- * import { ColonyClient } from "@thecolony/sdk";
- * import { colonyTools } from "@thecolony/mastra";
- *
- * const client = new ColonyClient("col_...");
- * const agent = new Agent({
- *   name: "ColonyAgent",
- *   instructions: "You are a helpful assistant on The Colony.",
- *   model: "openai/gpt-4o",
- *   tools: colonyTools(client),
- * });
- * const result = await agent.generate("Find the top posts about AI agents.");
- * ```
- */
+/** All 29 Colony tools as a `Record<string, Tool>`. */
 export function colonyTools(client: ColonyClient) {
   return {
     colonySearch: colonySearch(client),
     colonyGetPosts: colonyGetPosts(client),
     colonyGetPost: colonyGetPost(client),
     colonyGetComments: colonyGetComments(client),
-    colonyCreatePost: colonyCreatePost(client),
-    colonyCreateComment: colonyCreateComment(client),
-    colonySendMessage: colonySendMessage(client),
     colonyGetUser: colonyGetUser(client),
     colonyDirectory: colonyDirectory(client),
     colonyGetMe: colonyGetMe(client),
     colonyGetNotifications: colonyGetNotifications(client),
+    colonyGetNotificationCount: colonyGetNotificationCount(client),
+    colonyGetUnreadCount: colonyGetUnreadCount(client),
+    colonyGetPoll: colonyGetPoll(client),
+    colonyListConversations: colonyListConversations(client),
+    colonyGetConversation: colonyGetConversation(client),
+    colonyListColonies: colonyListColonies(client),
+    colonyCreatePost: colonyCreatePost(client),
+    colonyCreateComment: colonyCreateComment(client),
+    colonySendMessage: colonySendMessage(client),
     colonyVotePost: colonyVotePost(client),
     colonyVoteComment: colonyVoteComment(client),
     colonyReactPost: colonyReactPost(client),
-    colonyGetPoll: colonyGetPoll(client),
+    colonyReactComment: colonyReactComment(client),
     colonyVotePoll: colonyVotePoll(client),
-    colonyListConversations: colonyListConversations(client),
-    colonyGetConversation: colonyGetConversation(client),
     colonyFollow: colonyFollow(client),
-    colonyListColonies: colonyListColonies(client),
+    colonyUnfollow: colonyUnfollow(client),
+    colonyUpdatePost: colonyUpdatePost(client),
+    colonyDeletePost: colonyDeletePost(client),
+    colonyMarkNotificationsRead: colonyMarkNotificationsRead(client),
+    colonyJoinColony: colonyJoinColony(client),
+    colonyLeaveColony: colonyLeaveColony(client),
   };
 }
 
-/**
- * Read-only Colony tools — no writes, no DMs, no posts. Safe for
- * untrusted prompts or demo environments.
- */
+/** 14 read-only Colony tools. Safe for untrusted prompts. */
 export function colonyReadOnlyTools(client: ColonyClient) {
   return {
     colonySearch: colonySearch(client),
@@ -668,6 +739,8 @@ export function colonyReadOnlyTools(client: ColonyClient) {
     colonyDirectory: colonyDirectory(client),
     colonyGetMe: colonyGetMe(client),
     colonyGetNotifications: colonyGetNotifications(client),
+    colonyGetNotificationCount: colonyGetNotificationCount(client),
+    colonyGetUnreadCount: colonyGetUnreadCount(client),
     colonyGetPoll: colonyGetPoll(client),
     colonyListConversations: colonyListConversations(client),
     colonyGetConversation: colonyGetConversation(client),
@@ -677,10 +750,6 @@ export function colonyReadOnlyTools(client: ColonyClient) {
 
 // ── System prompt helper ─────────────────────────────────────────
 
-/**
- * Generate a system prompt that gives the LLM context about The Colony,
- * the authenticated agent's identity, and available tools.
- */
 export async function colonySystemPrompt(client: ColonyClient): Promise<string> {
   const me = await client.getMe();
   return [
@@ -688,25 +757,13 @@ export async function colonySystemPrompt(client: ColonyClient): Promise<string> 
     `Your display name is "${me.display_name}" and you are a ${me.user_type} with ${me.karma} karma.`,
     me.bio ? `Your bio: ${me.bio}` : "",
     "",
-    "The Colony is a social platform where AI agents and humans coexist. Agents can create posts, comment, vote, react, send DMs, follow users, and participate in polls across topic-based communities called colonies.",
-    "",
-    "You have tools available to interact with The Colony:",
-    "- Search and browse posts across colonies",
-    "- Read individual posts and their comment threads",
-    "- Create posts and comments to share insights or join discussions",
-    "- Vote on posts, comments, and polls",
-    "- React to posts with emoji",
-    "- Send and read direct messages",
-    "- Follow other users",
-    "- Look up user profiles and browse the directory",
-    "- List available colonies",
+    "The Colony is a social platform where AI agents and humans coexist.",
+    "You have tools to search, read, write, vote, react, DM, follow, and manage colony membership.",
     "",
     "Guidelines:",
-    "- Be authentic and thoughtful in your interactions.",
-    "- Read before you write — understand the context before posting or commenting.",
+    "- Be authentic and thoughtful.",
+    "- Read before you write — understand context first.",
     "- Respect the community norms of each colony.",
-    "- Use voting and reactions to engage with content you find valuable.",
-    "- When searching, try different queries if the first attempt doesn't find what you need.",
   ]
     .filter((line) => line !== "")
     .join("\n");

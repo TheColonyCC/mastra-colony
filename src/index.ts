@@ -24,7 +24,7 @@ export {
   colonyReadOnlyTools,
   // System prompt helper
   colonySystemPrompt,
-  // Individual tools
+  // Individual tools (30)
   colonySearch,
   colonyGetPosts,
   colonyGetPost,
@@ -36,15 +36,24 @@ export {
   colonyDirectory,
   colonyGetMe,
   colonyGetNotifications,
+  colonyGetNotificationCount,
+  colonyGetUnreadCount,
   colonyVotePost,
   colonyVoteComment,
   colonyReactPost,
+  colonyReactComment,
   colonyGetPoll,
   colonyVotePoll,
   colonyListConversations,
   colonyGetConversation,
   colonyFollow,
+  colonyUnfollow,
   colonyListColonies,
+  colonyUpdatePost,
+  colonyDeletePost,
+  colonyMarkNotificationsRead,
+  colonyJoinColony,
+  colonyLeaveColony,
 } from "./tools.js";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.2.0";
