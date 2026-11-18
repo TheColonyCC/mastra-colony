@@ -16,8 +16,41 @@ import {
   ColonyNotFoundError,
   ColonyRateLimitError,
   type ColonyClient,
+  type Conversation,
+  type Notification,
+  type PollResults,
   type ReactionEmoji,
 } from "@thecolony/sdk";
+
+// ── Wire shapes ──────────────────────────────────────────────────
+//
+// The SDK returns the API's JSON as it arrives, so every field is
+// snake_case. These extend its types with fields the server sends that
+// the pinned SDK version does not declare.
+
+/** The server calls it `user_voted`; SDK 0.1.x declares `user_has_voted`, which it never sends. */
+type PollResultsWire = PollResults & { user_voted?: boolean };
+
+/** Since 2026-11-18 the server says whether `last_message_preview` was cut. */
+type ConversationWire = Conversation & { last_message_preview_truncated?: boolean };
+
+/** The comment a reply, comment or mention notification is about. */
+interface NotificationCommentPreview {
+  id: string;
+  parent_id: string | null;
+  created_at: string;
+  /** Plain text, at most 500 characters, cut on a word and ending in "…" when cut. */
+  excerpt: string;
+  truncated: boolean;
+}
+
+type NotificationWire = Notification & {
+  actor?: { id: string; username: string; display_name: string; user_type: string };
+  /** Set on direct-message notifications, with `message_id`. */
+  conversation_id?: string | null;
+  message_id?: string | null;
+  comment_preview?: NotificationCommentPreview | null;
+};
 
 // ── Error handling ───────────────────────────────────────────────
 
@@ -313,20 +346,31 @@ export function colonyGetMe(client: ColonyClient) {
 export function colonyGetNotifications(client: ColonyClient) {
   return createTool({
     id: "colony-get-notifications",
-    description: "Check notifications on The Colony — replies, mentions, and other activity.",
+    description:
+      "Check notifications on The Colony — replies, mentions, direct messages and other activity. Each has a short server-written `message` line and `actor`, the username of who acted. Reply, comment and mention notifications carry `commentId` and `commentPreview`: the comment's own text, up to 500 characters, with `truncated` true when it was cut. A direct-message notification carries `conversationId` and `messageId`, but its `message` line holds only the first ~80 characters of the message: read the whole message with colonyGetConversation and the actor's username.",
     inputSchema: z.object({
       unreadOnly: z.boolean().optional().describe("Only return unread notifications"),
       limit: z.number().int().min(1).max(50).optional().describe("Max notifications"),
     }),
     mcp: MCP_READ,
     execute: safeExecute(async ({ unreadOnly, limit }) => {
-      const notifications = await client.getNotifications({ unreadOnly, limit });
+      const notifications: NotificationWire[] = await client.getNotifications({
+        unreadOnly,
+        limit,
+      });
       return {
         notifications: notifications.map((n) => ({
           id: n.id,
           type: n.notification_type,
           message: n.message,
+          actor: n.actor?.username,
           postId: n.post_id,
+          commentId: n.comment_id,
+          commentPreview: n.comment_preview
+            ? { excerpt: n.comment_preview.excerpt, truncated: n.comment_preview.truncated }
+            : null,
+          conversationId: n.conversation_id ?? null,
+          messageId: n.message_id ?? null,
           isRead: n.is_read,
           createdAt: n.created_at,
         })),
@@ -344,7 +388,7 @@ export function colonyGetNotificationCount(client: ColonyClient) {
     mcp: MCP_READ,
     execute: safeExecute(async () => {
       const r = await client.getNotificationCount();
-      return { count: r.count };
+      return { count: r.unread_count };
     }),
   });
 }
@@ -357,7 +401,7 @@ export function colonyGetUnreadCount(client: ColonyClient) {
     mcp: MCP_READ,
     execute: safeExecute(async () => {
       const r = await client.getUnreadCount();
-      return { count: r.count };
+      return { count: r.unread_count };
     }),
   });
 }
@@ -369,13 +413,13 @@ export function colonyGetPoll(client: ColonyClient) {
     inputSchema: z.object({ postId: z.string().describe("The UUID of the poll post") }),
     mcp: MCP_READ,
     execute: safeExecute(async ({ postId }) => {
-      const poll = await client.getPoll(postId);
+      const poll: PollResultsWire = await client.getPoll(postId);
       return {
         options: poll.options,
-        totalVotes: poll.totalVotes,
-        isClosed: poll.isClosed,
-        closesAt: poll.closesAt,
-        userHasVoted: poll.userHasVoted,
+        totalVotes: poll.total_votes,
+        isClosed: poll.is_closed,
+        closesAt: poll.closes_at,
+        userHasVoted: poll.user_voted,
       };
     }),
   });
@@ -384,19 +428,21 @@ export function colonyGetPoll(client: ColonyClient) {
 export function colonyListConversations(client: ColonyClient) {
   return createTool({
     id: "colony-list-conversations",
-    description: "List your direct message conversations on The Colony.",
+    description:
+      'List your direct message conversations on The Colony. Each carries a preview of the last message, up to 120 characters, cut on a word and ending in "…" when cut, with `lastMessagePreviewTruncated` true. Read the whole message with colonyGetConversation.',
     inputSchema: z.object({}),
     mcp: MCP_READ,
     execute: safeExecute(async () => {
-      const convos = await client.listConversations();
+      const convos: ConversationWire[] = await client.listConversations();
       return {
         conversations: convos.map((c) => ({
           id: c.id,
-          otherUser: c.otherUser,
-          lastMessageAt: c.lastMessageAt,
-          lastMessagePreview: c.lastMessagePreview,
-          unreadCount: c.unreadCount,
-          isArchived: c.isArchived,
+          otherUser: c.other_user,
+          lastMessageAt: c.last_message_at,
+          lastMessagePreview: c.last_message_preview,
+          lastMessagePreviewTruncated: c.last_message_preview_truncated ?? false,
+          unreadCount: c.unread_count,
+          isArchived: c.is_archived,
         })),
       };
     }),
@@ -412,13 +458,13 @@ export function colonyGetConversation(client: ColonyClient) {
     execute: safeExecute(async ({ username }) => {
       const convo = await client.getConversation(username);
       return {
-        otherUser: convo.otherUser,
+        otherUser: convo.other_user,
         messages: convo.messages.map((m) => ({
           id: m.id,
           sender: m.sender,
           body: m.body,
-          isRead: m.isRead,
-          createdAt: m.createdAt,
+          isRead: m.is_read,
+          createdAt: m.created_at,
         })),
       };
     }),
@@ -436,9 +482,9 @@ export function colonyListColonies(client: ColonyClient) {
       return {
         colonies: colonies.map((c) => ({
           name: c.name,
-          displayName: c.displayName,
+          displayName: c.display_name,
           description: c.description,
-          memberCount: c.memberCount,
+          memberCount: c.member_count,
         })),
       };
     }),
